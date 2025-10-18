@@ -1,5 +1,11 @@
 import { Hono } from 'hono';
-import { getIssueBySlug, listPublishedIssues, listGalleryImages } from '../lib/db';
+import {
+  getIssueBySlug,
+  getIssuePortalByToken,
+  listPublishedIssues,
+  listGalleryImages,
+  listIssueSubmissionsForPortal,
+} from '../lib/db';
 import type { Env } from '../types/bindings';
 
 const styles = `:root { color-scheme: light dark; }
@@ -116,15 +122,42 @@ if (!tokenInput || !saveBtn || !clearBtn || !statusEl || !submissionsContainer |
     const formData = new FormData(issueForm);
     const payload = {};
     formData.forEach((value, key) => {
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return;
+        }
+        if (key === 'publishAt' || key === 'submissionDeadline') {
+          const date = new Date(trimmed);
+          if (!Number.isNaN(date.getTime())) {
+            payload[key] = date.toISOString();
+          }
+          return;
+        }
+        payload[key] = trimmed;
+        return;
+      }
       payload[key] = value;
     });
 
     try {
-      await apiFetch('/api/issues', {
+      const response = await apiFetch('/api/issues', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      showToast('期刊创建成功');
+      let message = '期刊创建成功';
+      if (response && typeof response === 'object' && 'data' in response && response.data) {
+        const data = response.data;
+        if (data && typeof data === 'object' && 'portal_token' in data && data.portal_token) {
+          try {
+            const url = new URL('/submit/' + data.portal_token, window.location.origin);
+            message = '期刊创建成功，投稿链接：' + url.toString();
+          } catch (err) {
+            message = '期刊创建成功，投稿口令：' + data.portal_token;
+          }
+        }
+      }
+      showToast(message);
       issueForm.reset();
       await refreshAll();
     } catch (error) {
@@ -489,6 +522,140 @@ pagesRoute.get('/issues/:slug', async (c) => {
   return c.html(layout(`${issueRecord.title} · FilmWeekly`, body));
 });
 
+pagesRoute.get('/submit/:token', async (c) => {
+  const token = c.req.param('token');
+  if (!token) {
+    return c.html(
+      layout(
+        '投稿入口不可用 · FilmWeekly',
+        '<main style="padding:4rem 1.5rem; text-align:center;">缺少投稿口令。</main>',
+      ),
+      400,
+    );
+  }
+
+  const portal = await getIssuePortalByToken(c.env, token);
+  if (!portal) {
+    return c.html(
+      layout(
+        '投稿入口不可用 · FilmWeekly',
+        '<main style="padding:4rem 1.5rem; text-align:center;">未找到对应的投稿入口。</main>',
+      ),
+      404,
+    );
+  }
+
+  const issueId = portal.issue_id as number;
+  const submissions = await listIssueSubmissionsForPortal(c.env, issueId);
+  const issueTitle = (portal.issue_title as string | null) ?? '匿名投稿';
+  const summary = (portal.summary as string | null) ?? '';
+  const guidance = (portal.guidance as string | null) ?? '';
+  const deadline = portal.submission_deadline as string | null;
+  const deadlineDate = deadline ? new Date(deadline) : null;
+  const submissionClosed = deadlineDate
+    ? !Number.isNaN(deadlineDate.getTime()) && deadlineDate.getTime() < Date.now()
+    : false;
+  const deadlineLabel = deadline ? formatDate(deadline) || deadline : '未设置';
+  const votingOpen = submissionClosed;
+
+  const portalPayload = {
+    portal: { token: portal.token, createdAt: portal.created_at },
+    issue: {
+      id: issueId,
+      slug: portal.issue_slug,
+      title: issueTitle,
+      summary,
+      guidance,
+      publishAt: portal.publish_at,
+      submissionDeadline: deadline,
+      status: portal.issue_status,
+    },
+    voting: {
+      isOpen: votingOpen,
+      limitPerIp: 5,
+    },
+    submissions,
+  };
+
+  const portalData = JSON.stringify(portalPayload).replace(/</g, '\\u003c');
+  const initialDeadlineText = submissionClosed
+    ? `投稿已于 ${deadlineLabel} 截止`
+    : `投稿截止：${deadlineLabel}`;
+
+  const scriptParts: string[] = [];
+  scriptParts.push('<script type="module">(() => {');
+  scriptParts.push(`const initialState = ${portalData};`);
+  scriptParts.push('let portalState = initialState;');
+  scriptParts.push("const form = document.getElementById('portal-form');");
+  scriptParts.push("const fileInput = document.getElementById('portal-images');");
+  scriptParts.push("const statusEl = document.getElementById('portal-status');");
+  scriptParts.push("const deadlineEl = document.getElementById('portal-deadline');");
+  scriptParts.push("const submissionsEl = document.getElementById('portal-submissions');");
+  scriptParts.push("const votingNotice = document.getElementById('portal-voting-notice');");
+  scriptParts.push("const refreshBtn = document.getElementById('portal-refresh');");
+  scriptParts.push("const submitBtn = document.getElementById('portal-submit');");
+  scriptParts.push('if (!form || !fileInput || !statusEl || !deadlineEl || !submissionsEl || !votingNotice || !refreshBtn || !submitBtn) { console.warn("Portal page failed to initialize"); return; }');
+  scriptParts.push('render(portalState);');
+  scriptParts.push('refreshBtn.addEventListener("click", () => refreshPortal());');
+  scriptParts.push('form.addEventListener("submit", (event) => submitEntry(event));');
+  scriptParts.push('async function refreshPortal() { try { const res = await fetch("/api/portals/" + encodeURIComponent(portalState.portal.token)); const payload = await res.json().catch(() => null); if (!res.ok || !payload || !payload.data) throw new Error((payload && payload.error) || "刷新失败"); portalState = payload.data; render(portalState); } catch (error) { const message = error && typeof error === "object" && "message" in error ? error.message : null; setStatus(message || "刷新失败", "error"); } }');
+  scriptParts.push('function render(state) { updateDeadline(state.issue.submissionDeadline); updateVoting(state.voting); renderSubmissions(Array.isArray(state.submissions) ? state.submissions : []); }');
+  scriptParts.push('function updateDeadline(deadline) { if (!deadline) { deadlineEl.textContent = "投稿截止：未设置（长期开放）"; deadlineEl.style.color = "rgba(148,163,184,0.85)"; toggleForm(true); return; } const time = new Date(deadline); const closed = !Number.isNaN(time.getTime()) && time.getTime() < Date.now(); const formatted = new Intl.DateTimeFormat("zh-CN", { dateStyle: "full", timeStyle: "short" }).format(time); deadlineEl.textContent = closed ? "投稿已于 " + formatted + " 截止" : "投稿截止：" + formatted; deadlineEl.style.color = closed ? "#f87171" : "rgba(148,163,184,0.85)"; toggleForm(!closed); }');
+  scriptParts.push('function toggleForm(enabled) { Array.from(form.elements).forEach((el) => { if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el instanceof HTMLButtonElement) { if (el instanceof HTMLButtonElement && el.type === "button") { el.disabled = false; } else { el.disabled = !enabled; } if (el instanceof HTMLButtonElement && el.type === "submit") { el.textContent = enabled ? "提交作品" : "投稿已截止"; } } }); if (!enabled) { setStatus("投稿已截止，感谢你的关注。", "warning"); } else { setStatus("", "info"); } }');
+  scriptParts.push('function updateVoting(voting) { if (!voting || !voting.isOpen) { if (portalState.issue.submissionDeadline) { votingNotice.textContent = "投票将在投稿截止后开放。"; } else { votingNotice.textContent = "当前期刊暂未启用投票。"; } return; } votingNotice.textContent = "投票已开放，每个 IP 最多 " + voting.limitPerIp + " 票，每个作品仅可投一次。"; }');
+  scriptParts.push('function renderSubmissions(items) { submissionsEl.innerHTML = ""; if (!items.length) { const empty = document.createElement("p"); empty.textContent = "尚无公开作品，期待你的投稿。"; empty.style.color = "rgba(148,163,184,0.85)"; submissionsEl.appendChild(empty); return; } items.forEach((item) => { const card = document.createElement("article"); card.className = "card"; card.style.background = "rgba(8,47,73,0.45)"; const title = document.createElement("h3"); title.textContent = item && item.title ? item.title : "未命名作品"; title.style.marginTop = "0"; card.appendChild(title); const author = document.createElement("p"); author.textContent = "作者：" + (item && item.author_name ? item.author_name : "匿名"); author.style.color = "rgba(148,163,184,0.85)"; author.style.marginTop = "0.2rem"; card.appendChild(author); if (item && item.description) { const desc = document.createElement("p"); desc.textContent = item.description; desc.style.color = "rgba(226,232,240,0.78)"; desc.style.lineHeight = "1.6"; card.appendChild(desc); } const footer = document.createElement("div"); footer.style.display = "flex"; footer.style.justifyContent = "space-between"; footer.style.alignItems = "center"; footer.style.marginTop = "0.75rem"; const votes = document.createElement("span"); votes.textContent = "当前票数：" + (item && item.vote_count != null ? item.vote_count : 0); votes.style.color = "rgba(148,163,184,0.85)"; footer.appendChild(votes); const button = document.createElement("button"); button.type = "button"; button.textContent = "投票"; button.disabled = !portalState.voting || !portalState.voting.isOpen; button.addEventListener("click", () => voteFor(item.id, button)); footer.appendChild(button); card.appendChild(footer); submissionsEl.appendChild(card); }); }');
+  scriptParts.push('async function voteFor(submissionId, button) { if (!portalState.voting || !portalState.voting.isOpen) { setStatus("投票尚未开放", "warning"); return; } button.disabled = true; try { const res = await fetch("/api/submissions/" + submissionId + "/votes", { method: "POST" }); const payload = await res.json().catch(() => null); if (!res.ok || !payload || !payload.data) throw new Error((payload && payload.error) || "投票失败"); const remaining = payload.data.remainingVotes; setStatus("投票成功" + (typeof remaining === "number" ? "，剩余票数：" + remaining : ""), "success"); await refreshPortal(); } catch (error) { const message = error && typeof error === "object" && "message" in error ? error.message : null; setStatus(message || "投票失败", "error"); } finally { button.disabled = false; } }');
+  scriptParts.push('async function submitEntry(event) { event.preventDefault(); if (!fileInput.files || !fileInput.files.length) { setStatus("请至少选择一张图片（单张文件需大于 10MB）", "error"); return; } const formData = new FormData(form); const payload = { portalToken: portalState.portal.token, issueId: portalState.issue.id, title: "", images: [] }; formData.forEach((value, key) => { if (key === "images") return; if (typeof value === "string") { const trimmed = value.trim(); if (!trimmed) return; if (key === "title") { payload.title = trimmed; } else if (key === "authorName" || key === "authorContact" || key === "location" || key === "shotAt" || key === "equipment" || key === "description") { payload[key] = trimmed; } } }); if (!payload.title) { setStatus("请填写作品标题", "error"); return; } submitBtn.disabled = true; try { const files = Array.from(fileInput.files); const images = []; let index = 0; for (const file of files) { index += 1; setStatus("正在上传第 " + index + " 张图片…", "info"); const image = await uploadImage(file); images.push(image); } payload.images = images; setStatus("正在提交投稿…", "info"); const res = await fetch("/api/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); const responsePayload = await res.json().catch(() => null); if (!res.ok) throw new Error((responsePayload && responsePayload.error) || "投稿失败"); setStatus("投稿成功，感谢参与！", "success"); form.reset(); await refreshPortal(); } catch (error) { const message = error && typeof error === "object" && "message" in error ? error.message : null; setStatus(message || "投稿失败，请稍后再试", "error"); } finally { submitBtn.disabled = false; } }');
+  scriptParts.push('async function uploadImage(file) { const initRes = await fetch("/api/uploads/initiate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename: file.name, size: file.size, contentType: file.type || "application/octet-stream" }) }); const initJson = await initRes.json().catch(() => null); if (!initRes.ok || !initJson || !initJson.data) throw new Error((initJson && initJson.error) || "初始化上传失败"); const uploadInfo = initJson.data; const partRes = await fetch("/api/uploads/multipart/" + uploadInfo.uploadId + "/part/1", { method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: await file.arrayBuffer() }); const partJson = await partRes.json().catch(() => null); if (!partRes.ok || !partJson || !partJson.data) throw new Error((partJson && partJson.error) || "上传分片失败"); const completeRes = await fetch("/api/uploads/complete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ uploadId: uploadInfo.uploadId, key: uploadInfo.key, parts: [{ partNumber: 1, etag: partJson.data.etag }] }) }); const completeJson = await completeRes.json().catch(() => null); if (!completeRes.ok) throw new Error((completeJson && completeJson.error) || "完成上传失败"); return { r2Key: uploadInfo.key, thumbnailKey: uploadInfo.thumbnailKey, originalName: file.name, size: file.size }; }');
+  scriptParts.push('function setStatus(message, variant) { statusEl.textContent = message || ""; if (!message) { statusEl.style.color = "rgba(148,163,184,0.85)"; return; } if (variant === "error") { statusEl.style.color = "#f87171"; } else if (variant === "success") { statusEl.style.color = "#4ade80"; } else if (variant === "warning") { statusEl.style.color = "#facc15"; } else { statusEl.style.color = "rgba(148,163,184,0.85)"; } }');
+  scriptParts.push('})();</script>');
+
+  const bodySegments = [
+    '<header style="padding:3rem 1.5rem 2.5rem; text-align:center; background: radial-gradient(circle at top, rgba(56,189,248,0.25), transparent 60%);">',
+    `  <h1 style="font-size: clamp(2.2rem, 4vw, 3rem); margin-bottom: 0.5rem;">${issueTitle}</h1>`,
+    `  <div class="badge" style="margin-top: 1rem; display:inline-flex;">${initialDeadlineText}</div>`,
+    summary
+      ? `  <p style="max-width: 680px; margin: 1.25rem auto 0; color: rgba(226,232,240,0.78); line-height: 1.7;">${summary}</p>`
+      : '',
+    `  <p style="max-width: 680px; margin: 1rem auto 0; color: rgba(148,163,184,0.85);">导向语：${guidance || '自由投稿'}</p>`,
+    '</header>',
+    '<main style="max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: grid; gap: 1.5rem;">',
+    '  <section class="card">',
+    '    <h2 style="margin-top:0;">提交作品</h2>',
+    `    <p id="portal-deadline" style="color: rgba(148,163,184,0.85); margin-top:0.5rem;">${initialDeadlineText}</p>`,
+    '    <form id="portal-form" style="display:grid; gap:0.75rem; margin-top:1.5rem;">',
+    '      <input name="title" placeholder="作品标题" required />',
+    '      <input name="authorName" placeholder="作者 (可选)" />',
+    '      <input name="authorContact" placeholder="联系方式 (可选)" />',
+    '      <input name="location" placeholder="拍摄地点 (可选)" />',
+    '      <input name="shotAt" placeholder="拍摄时间 (可选，如 2023 夏)" />',
+    '      <input name="equipment" placeholder="器材信息 (可选)" />',
+    '      <textarea name="description" placeholder="作品简介 (可选)"></textarea>',
+    '      <label style="display:flex; flex-direction:column; gap:0.4rem;">',
+    '        <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">上传原图（支持多张，每张需 ≥10MB）</span>',
+    '        <input id="portal-images" name="images" type="file" accept="image/*" multiple required />',
+    '      </label>',
+    '      <button id="portal-submit" type="submit">提交作品</button>',
+    '    </form>',
+    '    <p id="portal-status" style="min-height:1.5rem; margin-top:0.75rem; color: rgba(148,163,184,0.85);"></p>',
+    '  </section>',
+    '  <section class="card">',
+    '    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">',
+    '      <h2 style="margin:0;">参赛作品</h2>',
+    '      <button id="portal-refresh" type="button" style="background: rgba(148,163,184,0.18); color:#e2e8f0;">刷新</button>',
+    '    </div>',
+    '    <p id="portal-voting-notice" style="color: rgba(148,163,184,0.85); margin-top:0.75rem;"></p>',
+    '    <div id="portal-submissions" style="display:grid; gap:0.75rem; margin-top:1rem;"></div>',
+    '  </section>',
+    '</main>',
+    scriptParts.join('\n'),
+  ];
+
+  const htmlBody = bodySegments.join('\n');
+
+  return c.html(layout(`${issueTitle} 投稿入口 · FilmWeekly`, htmlBody));
+});
+
 pagesRoute.get('/admin', (c) => {
   const body = `
     <header>
@@ -517,7 +684,14 @@ pagesRoute.get('/admin', (c) => {
             <input name="title" placeholder="期刊标题" required />
             <textarea name="guidance" placeholder="导向语" required></textarea>
             <textarea name="summary" placeholder="期刊摘要"></textarea>
-            <input name="publishAt" type="datetime-local" placeholder="发布时间 (可选)" />
+            <label style="display:flex; flex-direction:column; gap:0.35rem;">
+              <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">发布时间（期刊将于该时间自动公开）</span>
+              <input name="publishAt" type="datetime-local" placeholder="选择发布时间 (可选)" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:0.35rem;">
+              <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">投稿截止时间（超过此时间停止接受投稿）</span>
+              <input name="submissionDeadline" type="datetime-local" placeholder="选择投稿截止时间 (可选)" />
+            </label>
             <button type="submit">创建期刊</button>
           </form>
           <h3 style="margin-top:1.5rem;">审计日志</h3>
