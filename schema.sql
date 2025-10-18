@@ -26,12 +26,15 @@ CREATE TABLE IF NOT EXISTS submissions (
   equipment TEXT,
   description TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
+  moderation_status TEXT NOT NULL DEFAULT 'pending',
+  moderation_summary TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_submissions_issue ON submissions(issue_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_status ON submissions(status);
+CREATE INDEX IF NOT EXISTS idx_submissions_moderation_status ON submissions(moderation_status);
 CREATE INDEX IF NOT EXISTS idx_submissions_author ON submissions(author_name);
 CREATE INDEX IF NOT EXISTS idx_submissions_location ON submissions(location);
 
@@ -73,3 +76,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   payload TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity, entity_id);
+
+-- Moderation results for asynchronous content review provider.
+CREATE TABLE IF NOT EXISTS moderation_results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  image_id INTEGER REFERENCES submission_images(id) ON DELETE SET NULL,
+  provider TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  score REAL,
+  reasons TEXT,
+  raw_response TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_moderation_results_submission ON moderation_results(submission_id);
