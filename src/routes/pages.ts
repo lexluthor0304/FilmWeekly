@@ -684,8 +684,14 @@ pagesRoute.get('/admin', (c) => {
             <input name="title" placeholder="期刊标题" required />
             <textarea name="guidance" placeholder="导向语" required></textarea>
             <textarea name="summary" placeholder="期刊摘要"></textarea>
-            <input name="publishAt" type="datetime-local" placeholder="发布时间 (可选)" />
-            <input name="submissionDeadline" type="datetime-local" placeholder="投稿截止时间 (可选)" />
+            <label style="display:flex; flex-direction:column; gap:0.35rem;">
+              <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">发布时间（期刊将于该时间自动公开）</span>
+              <input name="publishAt" type="datetime-local" placeholder="选择发布时间 (可选)" />
+            </label>
+            <label style="display:flex; flex-direction:column; gap:0.35rem;">
+              <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">投稿截止时间（超过此时间停止接受投稿）</span>
+              <input name="submissionDeadline" type="datetime-local" placeholder="选择投稿截止时间 (可选)" />
+            </label>
             <button type="submit">创建期刊</button>
           </form>
           <h3 style="margin-top:1.5rem;">审计日志</h3>
