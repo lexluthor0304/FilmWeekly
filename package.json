@@ -1,0 +1,23 @@
+{
+  "name": "filmweekly",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240419.0",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.4.5",
+    "wrangler": "^3.52.0"
+  },
+  "dependencies": {
+    "hono": "^4.3.7",
+    "uuid": "^9.0.1",
+    "zod": "^3.23.8"
+  }
+}
