@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { getIssueBySlug, listPublishedIssues } from '../lib/db';
+import { getIssueBySlug, listPublishedIssues, listGalleryImages } from '../lib/db';
 import type { Env } from '../types/bindings';
 
 const styles = `:root { color-scheme: light dark; }
@@ -18,6 +18,45 @@ main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
 .gallery figure { background: rgba(15,23,42,0.55); border-radius: 1rem; overflow: hidden; margin: 0; border: 1px solid rgba(51,65,85,0.6); box-shadow: 0 12px 30px rgba(8,47,73,0.35); }
 .gallery img { display: block; width: 100%; height: auto; object-fit: cover; }
 .gallery figcaption { padding: 0.75rem 1rem; font-size: 0.85rem; color: rgba(226,232,240,0.85); }
+.gallery-layout { min-height: 100vh; display: flex; background: linear-gradient(145deg, rgba(15,23,42,0.95), rgba(8,47,73,0.92)); }
+.gallery-sidebar { width: 280px; padding: 2.5rem 2rem; background: rgba(10,21,38,0.85); border-right: 1px solid rgba(30,64,175,0.25); display: flex; flex-direction: column; gap: 2.5rem; position: sticky; top: 0; min-height: 100vh; }
+.gallery-brand { display: flex; flex-direction: column; gap: 1.25rem; }
+.gallery-logo { width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, #facc15, #fb7185); color: #0f172a; display: grid; place-items: center; font-size: 1.65rem; font-weight: 700; box-shadow: 0 18px 38px rgba(248,113,113,0.35); }
+.gallery-brand h1 { margin: 0; font-size: 1.85rem; letter-spacing: 0.05em; }
+.gallery-brand p { margin: 0; color: rgba(226,232,240,0.7); line-height: 1.6; }
+.gallery-nav ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.gallery-nav a { display: inline-flex; align-items: center; gap: 0.6rem; padding: 0.75rem 1rem; border-radius: 0.85rem; text-decoration: none; color: rgba(226,232,240,0.78); background: transparent; border: 1px solid transparent; transition: all 0.2s ease; font-weight: 500; letter-spacing: 0.01em; }
+.gallery-nav a:hover { background: rgba(56,189,248,0.12); border-color: rgba(56,189,248,0.35); color: rgba(224,242,254,0.95); transform: translateX(4px); }
+.gallery-nav a.is-active { background: rgba(248,250,252,0.92); color: #0f172a; border-color: transparent; box-shadow: 0 18px 40px rgba(148,163,184,0.35); }
+.gallery-social { display: flex; gap: 0.75rem; }
+.gallery-social a { width: 38px; height: 38px; border-radius: 999px; display: grid; place-items: center; background: rgba(15,23,42,0.65); border: 1px solid rgba(148,163,184,0.25); color: rgba(226,232,240,0.85); text-decoration: none; font-size: 0.85rem; font-weight: 600; letter-spacing: 0.06em; transition: transform 0.2s ease, background 0.2s ease; }
+.gallery-social a:hover { background: rgba(56,189,248,0.28); transform: translateY(-2px); color: #0f172a; }
+.gallery-sidebar small { color: rgba(148,163,184,0.7); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.gallery-main { flex: 1; padding: 3rem 3rem 4rem; max-width: 1100px; width: 100%; margin: 0 auto; }
+.gallery-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1.5rem; margin-bottom: 2.5rem; }
+.gallery-header h1 { margin: 0; font-size: clamp(2.2rem, 4vw, 3rem); letter-spacing: 0.03em; }
+.gallery-header p { margin: 0.5rem 0 0; color: rgba(148,163,184,0.85); max-width: 520px; line-height: 1.7; }
+.gallery-pill-group { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+.gallery-pill { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.9rem; border-radius: 999px; border: 1px solid rgba(56,189,248,0.35); background: rgba(56,189,248,0.15); color: rgba(224,242,254,0.9); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.gallery-grid { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.gallery-card { background: rgba(15,23,42,0.65); border: 1px solid rgba(51,65,85,0.45); border-radius: 1.35rem; overflow: hidden; box-shadow: 0 16px 40px rgba(8,47,73,0.38); transition: transform 0.25s ease, box-shadow 0.25s ease; display: flex; flex-direction: column; }
+.gallery-card:hover { transform: translateY(-6px); box-shadow: 0 26px 55px rgba(8,47,73,0.55); }
+.gallery-image { position: relative; overflow: hidden; }
+.gallery-image::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(15,23,42,0.45)); opacity: 0; transition: opacity 0.25s ease; }
+.gallery-card:hover .gallery-image::after { opacity: 1; }
+.gallery-image img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+.gallery-card:hover .gallery-image img { transform: scale(1.05); }
+.gallery-card:nth-child(3n+1) .gallery-image img { aspect-ratio: 4 / 5; }
+.gallery-card:nth-child(3n+2) .gallery-image img { aspect-ratio: 5 / 4; }
+.gallery-card:nth-child(3n) .gallery-image img { aspect-ratio: 1; }
+.gallery-card figcaption { padding: 1rem 1.25rem 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; }
+.gallery-caption-title { font-weight: 600; font-size: 1rem; color: rgba(248,250,252,0.95); }
+.gallery-caption-meta { color: rgba(148,163,184,0.85); font-size: 0.85rem; }
+.gallery-caption-link { font-size: 0.85rem; color: #38bdf8; text-decoration: none; display: inline-flex; align-items: center; gap: 0.25rem; }
+.gallery-caption-link:hover { text-decoration: underline; }
+.gallery-empty { padding: 3rem; border-radius: 1.25rem; border: 1px dashed rgba(148,163,184,0.35); background: rgba(15,23,42,0.35); text-align: center; color: rgba(148,163,184,0.85); font-size: 0.95rem; line-height: 1.8; }
+@media (max-width: 960px) { .gallery-layout { flex-direction: column; } .gallery-sidebar { position: static; width: 100%; min-height: auto; border-right: none; border-bottom: 1px solid rgba(30,64,175,0.25); padding: 2rem 1.5rem; } .gallery-nav ul { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); } .gallery-main { padding: 2.5rem 1.5rem 3rem; } }
+@media (max-width: 640px) { .gallery-nav ul { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); } .gallery-header { flex-direction: column; align-items: flex-start; } .gallery-pill-group { width: 100%; } }
 .admin-container { max-width: 1080px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
 .card { background: rgba(15,23,42,0.65); border-radius: 1rem; padding: 1.5rem; border: 1px solid rgba(51,65,85,0.5); box-shadow: 0 15px 40px rgba(8,47,73,0.4); margin-bottom: 1.5rem; }
 button, input, select, textarea { font: inherit; border-radius: 0.75rem; border: 1px solid rgba(148,163,184,0.3); padding: 0.65rem 1rem; background: rgba(15,23,42,0.5); color: #e2e8f0; }
@@ -298,6 +337,93 @@ pagesRoute.get('/', async (c) => {
     </main>
   `;
   return c.html(layout('FilmWeekly', body));
+});
+
+pagesRoute.get('/gallery', async (c) => {
+  const images = (await listGalleryImages(c.env)) as Array<Record<string, any>>;
+  const validImages = images.filter((image) => {
+    const record = image as Record<string, any>;
+    return typeof record.thumbnail_key === 'string' && record.thumbnail_key.length > 0;
+  });
+  const totalImages = validImages.length;
+  const galleryItems = validImages
+    .map((image) => {
+      const record = image as Record<string, any>;
+      const title = (record.submission_title as string | null) ?? '未命名作品';
+      const author = (record.author_name as string | null) ?? '匿名摄影师';
+      const issueTitle = (record.issue_title as string | null) ?? '';
+      const issueSlug = (record.issue_slug as string | null) ?? '';
+      const originalName = (record.original_name as string | null) ?? title;
+      const issueMeta = issueTitle ? ` · ${issueTitle}` : '';
+      const issueLink = issueSlug
+        ? `<a class="gallery-caption-link" href="/issues/${issueSlug}">查看期刊 →</a>`
+        : '';
+      return `
+        <figure class="gallery-card">
+          <div class="gallery-image">
+            <img src="/media/${toMediaPath(record.thumbnail_key as string)}" alt="${originalName}" loading="lazy" />
+          </div>
+          <figcaption>
+            <span class="gallery-caption-title">${title}</span>
+            <span class="gallery-caption-meta">${author}${issueMeta}</span>
+            ${issueLink}
+          </figcaption>
+        </figure>
+      `;
+    })
+    .join('');
+
+  const body = `
+    <div class="gallery-layout">
+      <aside class="gallery-sidebar">
+        <div class="gallery-brand">
+          <div class="gallery-logo">📷</div>
+          <h1>Capture</h1>
+          <p>FilmWeekly 画廊收录了我们最钟爱的胶片瞬间。留在这里，随时捕捉灵感。</p>
+        </div>
+        <nav class="gallery-nav" aria-label="主要导航">
+          <ul>
+            <li><a href="/">首页</a></li>
+            <li><a href="/gallery" class="is-active">作品画廊</a></li>
+            <li><a href="https://github.com/lex/FilmWeekly#readme" target="_blank" rel="noopener">关于</a></li>
+            <li><a href="https://github.com/lex/FilmWeekly" target="_blank" rel="noopener">博客</a></li>
+            <li><a href="mailto:hello@filmweekly.test">联系</a></li>
+          </ul>
+        </nav>
+        <div>
+          <small>FOLLOW US</small>
+          <div class="gallery-social">
+            <a href="https://instagram.com" target="_blank" rel="noopener" aria-label="Instagram">IG</a>
+            <a href="https://weibo.com" target="_blank" rel="noopener" aria-label="Weibo">WB</a>
+            <a href="mailto:hello@filmweekly.test" aria-label="Email">✉</a>
+          </div>
+        </div>
+      </aside>
+      <main class="gallery-main">
+        <header class="gallery-header">
+          <div>
+            <div class="gallery-pill-group">
+              <span class="gallery-pill">精选作品</span>
+              <span class="gallery-pill">胶片质感</span>
+            </div>
+            <h1>胶片摄影作品画廊</h1>
+            <p>沉浸式浏览来自社区投稿的胶片摄影作品。每一帧都是光影与颗粒的交织，呈现真实的模拟质感。</p>
+          </div>
+          <div class="gallery-pill-group">
+            <span class="gallery-pill">${totalImages} 张作品</span>
+            <span class="gallery-pill">每周更新</span>
+          </div>
+        </header>
+        ${
+          totalImages
+            ? `<section class="gallery-grid">${galleryItems}</section>`
+            : '<div class="gallery-empty">暂时还没有可以展示的作品。欢迎稍后再来，或前往首页查看最新一期的胶片期刊。</div>'
+        }
+      </main>
+    </div>
+  `;
+
+  return c.html(layout('作品画廊 · FilmWeekly', body));
 });
 
 pagesRoute.get('/issues/:slug', async (c) => {

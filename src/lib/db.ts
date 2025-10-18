@@ -290,6 +290,32 @@ export async function getIssueBySlug(env: Env, slug: string) {
   return { ...issue, submissions: decorated };
 }
 
+export async function listGalleryImages(env: Env, limit = 45) {
+  const { results } = await env.DB.prepare(
+    `SELECT
+       si.id,
+       si.thumbnail_key,
+       si.original_name,
+       si.width,
+       si.height,
+       s.title AS submission_title,
+       s.author_name,
+       i.title AS issue_title,
+       i.slug AS issue_slug
+     FROM submission_images si
+     JOIN submissions s ON s.id = si.submission_id
+     JOIN issues i ON i.id = s.issue_id
+     WHERE i.status = 'published'
+       AND s.status IN ('approved', 'published')
+     ORDER BY s.created_at DESC, si.position ASC
+     LIMIT ?1`
+  )
+    .bind(limit)
+    .all<Record<string, unknown>>();
+
+  return results ?? [];
+}
+
 export async function recordReview(
   env: Env,
   submissionId: number,
