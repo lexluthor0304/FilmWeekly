@@ -2,6 +2,11 @@ name = "filmweekly-worker"
 main = "src/worker.ts"
 compatibility_date = "2024-04-03"
 
+[vars]
+ADMIN_API_TOKEN = "changeme-admin-token"
+MODERATION_API_URL = "https://moderation.example.com/v1/analyze"
+MODERATION_API_TOKEN = "changeme-moderation-token"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "filmweekly"
@@ -18,3 +23,7 @@ id = "a3b70b46a9cb401c95fc7f6e290c613d"
 [[queues.producers]]
 binding = "TASK_QUEUE"
 queue = "filmweekly-tasks"
+
+[[queues.consumers]]
+queue = "filmweekly-tasks"
+max_batch_size = 10

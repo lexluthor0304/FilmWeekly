@@ -55,11 +55,10 @@ FilmWeekly 是一个基于 Cloudflare Workers 的胶片摄影期刊投稿与发�
 - `GET /api/issues`：查看期刊列表。
 - `POST /api/issues/:id/publish`：更新期刊状态（草稿/预定/发布）。
 
-## TODO
+## 前后端概览
 
-- 前端展示页面与后台管理界面。
-- 与 Cloudflare R2 的实际分片上传与缩略图生成 Worker/Queue 实现。
-- 审计日志写入与权限控制中间件。
-- 引入内容审核服务的异步处理流程。
+- `/`：列出所有已发布期刊，支持查看期刊详情与作品画廊展示。
+- `/admin`：内置单页后台，提供投稿审核、期刊创建与审计日志查看，需要 Bearer Token 才能调用 API。
+- `/api/*`：RESTful 接口；管理员相关接口需通过 `Authorization: Bearer <TOKEN>` 访问。
 
-欢迎在此基础上扩展更多功能，完善前后端体验。
+Worker 内置队列消费者处理缩略图生成与内容审核任务；可根据自身服务修改 `MODERATION_API_URL` 与 `MODERATION_API_TOKEN`。
