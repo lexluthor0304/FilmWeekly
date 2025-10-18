@@ -312,17 +312,17 @@ function toMediaPath(key: string) {
 export const pagesRoute = new Hono<{ Bindings: Env }>();
 
 pagesRoute.get('/', async (c) => {
-  const issues = (await listPublishedIssues(c.env)) as Array<Record<string, any>>;
-  const body = `
-    <header>
-      <h1 style="font-size: clamp(2rem, 4vw, 3rem); margin-bottom: 0.75rem;">FilmWeekly 胶片摄影期刊</h1>
-      <p style="max-width: 660px; margin: 0 auto; color: rgba(148,163,184,0.85); font-size: 1.05rem;">每周精选来自全球胶片摄影师的投稿，展现光影与颗粒感的独特魅力。浏览已发布的期刊，探索更多故事。</p>
-    </header>
-    <main>
-      <section class="grid">
-        ${issues
-          .map(
-            (issue) => `
+  let issues: Array<Record<string, any>> = [];
+  try {
+    issues = (await listPublishedIssues(c.env)) as Array<Record<string, any>>;
+  } catch (error) {
+    console.error('Failed to load published issues', error);
+  }
+
+  const issueCards = issues.length
+    ? issues
+        .map(
+          (issue) => `
               <article class="issue-card">
                 <div class="badge">第 ${issue.slug} 期 · ${formatDate(issue.publish_at as string | null)}</div>
                 <h2><a href="/issues/${issue.slug}" style="color: inherit; text-decoration: none;">${issue.title}</a></h2>
@@ -331,8 +331,17 @@ pagesRoute.get('/', async (c) => {
                 <a href="/issues/${issue.slug}" style="display:inline-flex; gap:0.4rem; align-items:center; margin-top:1.2rem; font-weight:600;">查看详情 →</a>
               </article>
             `,
-          )
-          .join('')}
+        )
+        .join('')
+    : '<p style="color: rgba(148,163,184,0.8);">暂无已发布的期刊，敬请期待后续更新。</p>';
+  const body = `
+    <header>
+      <h1 style="font-size: clamp(2rem, 4vw, 3rem); margin-bottom: 0.75rem;">FilmWeekly 胶片摄影期刊</h1>
+      <p style="max-width: 660px; margin: 0 auto; color: rgba(148,163,184,0.85); font-size: 1.05rem;">每周精选来自全球胶片摄影师的投稿，展现光影与颗粒感的独特魅力。浏览已发布的期刊，探索更多故事。</p>
+    </header>
+    <main>
+      <section class="grid">
+        ${issueCards}
       </section>
     </main>
   `;
@@ -340,7 +349,12 @@ pagesRoute.get('/', async (c) => {
 });
 
 pagesRoute.get('/gallery', async (c) => {
-  const images = (await listGalleryImages(c.env)) as Array<Record<string, any>>;
+  let images: Array<Record<string, any>> = [];
+  try {
+    images = (await listGalleryImages(c.env)) as Array<Record<string, any>>;
+  } catch (error) {
+    console.error('Failed to load gallery images', error);
+  }
   const validImages = images.filter((image) => {
     const record = image as Record<string, any>;
     return typeof record.thumbnail_key === 'string' && record.thumbnail_key.length > 0;
