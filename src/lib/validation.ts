@@ -23,7 +23,7 @@ export const imageSchema = z.object({
   metadata: imageMetadataSchema.optional(),
 });
 
-export const submissionSchema = z.object({
+const submissionCoreSchema = z.object({
   issueId: z.number().int().positive(),
   title: z.string().min(1).max(120),
   authorName: z.string().max(120).optional(),
@@ -35,12 +35,17 @@ export const submissionSchema = z.object({
   images: z.array(imageSchema).min(1),
 });
 
+export const submissionSchema = submissionCoreSchema.extend({
+  portalToken: z.string().min(8).optional(),
+});
+
 export const issueSchema = z.object({
   slug: z.string().min(1).max(80).regex(/^[a-z0-9-]+$/),
   title: z.string().min(1).max(120),
   guidance: z.string().min(1).max(100),
   summary: z.string().max(400).optional(),
   publishAt: z.string().datetime({ offset: true }).optional(),
+  submissionDeadline: z.string().datetime({ offset: true }).optional(),
 });
 
 export const reviewDecisionSchema = z.object({
@@ -53,7 +58,8 @@ export const publishIssueSchema = z.object({
   publishAt: z.string().datetime({ offset: true }).optional(),
 });
 
-export type SubmissionInput = z.infer<typeof submissionSchema>;
+export type SubmissionRequestInput = z.infer<typeof submissionSchema>;
+export type SubmissionInput = z.infer<typeof submissionCoreSchema>;
 export type IssueInput = z.infer<typeof issueSchema>;
 export type ReviewDecisionInput = z.infer<typeof reviewDecisionSchema>;
 export type PublishIssueInput = z.infer<typeof publishIssueSchema>;

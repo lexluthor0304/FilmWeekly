@@ -7,12 +7,22 @@ CREATE TABLE IF NOT EXISTS issues (
   summary TEXT,
   status TEXT NOT NULL DEFAULT 'draft',
   publish_at TEXT,
+  submission_deadline TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
 CREATE INDEX IF NOT EXISTS idx_issues_publish_at ON issues(publish_at);
+
+CREATE TABLE IF NOT EXISTS issue_portals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+  token TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_issue_portals_issue ON issue_portals(issue_id);
 
 -- Submissions table stores author provided information and workflow status.
 CREATE TABLE IF NOT EXISTS submissions (
@@ -53,6 +63,17 @@ CREATE TABLE IF NOT EXISTS submission_images (
 );
 
 CREATE INDEX IF NOT EXISTS idx_submission_images_submission ON submission_images(submission_id);
+
+CREATE TABLE IF NOT EXISTS submission_votes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  voter_ip TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(submission_id, voter_ip)
+);
+
+CREATE INDEX IF NOT EXISTS idx_submission_votes_submission ON submission_votes(submission_id);
+CREATE INDEX IF NOT EXISTS idx_submission_votes_ip ON submission_votes(voter_ip);
 
 -- Review logs keep track of moderation decisions.
 CREATE TABLE IF NOT EXISTS review_logs (

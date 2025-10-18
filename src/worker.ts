@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { issuesRoute } from './routes/issues';
 import { submissionsRoute } from './routes/submissions';
 import { uploadsRoute } from './routes/uploads';
+import { portalsRoute } from './routes/portals';
 import pagesRoute from './routes/pages';
 import adminRoute from './routes/admin';
 import { handleModerationTask, handleThumbnailTask } from './lib/tasks';
@@ -72,6 +73,7 @@ app.get('/media/*', async (c) => {
 app.route('/api/issues', issuesRoute);
 app.route('/api/submissions', submissionsRoute);
 app.route('/api/uploads', uploadsRoute);
+app.route('/api/portals', portalsRoute);
 app.route('/api/admin', adminRoute);
 
 app.notFound((c) => c.json({ error: 'Not Found' }, 404));

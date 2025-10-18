@@ -22,6 +22,13 @@ export interface SubmissionImageRecord {
   metadata_json: string | null;
 }
 
+export interface IssuePortalRecord {
+  id: number;
+  issue_id: number;
+  token: string;
+  created_at: string;
+}
+
 export interface ModerationResultInput {
   submissionId: number;
   imageId: number | null;
@@ -56,6 +63,52 @@ export async function logAudit(
       now,
     )
     .run();
+}
+
+async function ensureIssuePortal(env: Env, issueId: number) {
+  const existing = await env.DB.prepare(
+    `SELECT id, issue_id, token, created_at FROM issue_portals WHERE issue_id = ?1`,
+  )
+    .bind(issueId)
+    .first<IssuePortalRecord>();
+  if (existing) {
+    return existing;
+  }
+
+  const token = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const created = await env.DB.prepare(
+    `INSERT INTO issue_portals (issue_id, token, created_at)
+     VALUES (?1, ?2, ?3)
+     RETURNING id, issue_id, token, created_at`,
+  )
+    .bind(issueId, token, now)
+    .first<IssuePortalRecord>();
+
+  if (!created) {
+    throw new Error('Failed to create issue portal');
+  }
+  return created;
+}
+
+export async function getIssuePortal(env: Env, issueId: number) {
+  return ensureIssuePortal(env, issueId);
+}
+
+export async function getIssuePortalByToken(env: Env, token: string) {
+  const portal = await env.DB.prepare(
+    `SELECT p.id as portal_id, p.issue_id, p.token, p.created_at,
+            i.slug as issue_slug, i.title as issue_title, i.guidance,
+            i.summary, i.status as issue_status, i.publish_at,
+            i.submission_deadline
+     FROM issue_portals p
+     JOIN issues i ON i.id = p.issue_id
+     WHERE p.token = ?1`,
+  )
+    .bind(token)
+    .first<Record<string, unknown>>();
+  if (!portal) return null;
+  return portal;
 }
 
 export async function createSubmission(env: Env, input: SubmissionInput) {
@@ -129,7 +182,7 @@ export async function createSubmission(env: Env, input: SubmissionInput) {
 
 export async function getSubmission(env: Env, id: number) {
   const submission = await env.DB.prepare(
-    `SELECT s.*, i.guidance, i.title as issue_title
+    `SELECT s.*, i.guidance, i.title as issue_title, i.submission_deadline, i.status as issue_status
      FROM submissions s
      JOIN issues i ON i.id = s.issue_id
      WHERE s.id = ?1` ,
@@ -208,6 +261,18 @@ export async function createIssue(env: Env, input: IssueInput, actor: string) {
     .first<Record<string, unknown>>();
 
   if (result) {
+    if (input.submissionDeadline) {
+      await env.DB.prepare(
+        `UPDATE issues SET submission_deadline = ?2 WHERE id = ?1` ,
+      )
+        .bind(result.id as number, input.submissionDeadline)
+        .run();
+      result.submission_deadline = input.submissionDeadline;
+    }
+
+    const portal = await ensureIssuePortal(env, result.id as number);
+    (result as Record<string, unknown>).portal_token = portal.token;
+
     await logAudit(env, {
       actor,
       action: 'issue-created',
@@ -222,7 +287,7 @@ export async function createIssue(env: Env, input: IssueInput, actor: string) {
 
 export async function listIssues(env: Env) {
   const { results } = await env.DB.prepare(
-    `SELECT id, slug, title, guidance, summary, status, publish_at, created_at
+    `SELECT id, slug, title, guidance, summary, status, publish_at, submission_deadline, created_at
      FROM issues
      ORDER BY publish_at DESC NULLS LAST, created_at DESC` ,
   ).all<Record<string, unknown>>();
@@ -231,7 +296,7 @@ export async function listIssues(env: Env) {
 
 export async function listPublishedIssues(env: Env) {
   const { results } = await env.DB.prepare(
-    `SELECT id, slug, title, guidance, summary, publish_at
+    `SELECT id, slug, title, guidance, summary, publish_at, submission_deadline
      FROM issues
      WHERE status = 'published'
      ORDER BY publish_at DESC NULLS LAST, created_at DESC` ,
@@ -254,7 +319,9 @@ export async function getIssue(env: Env, id: number) {
     .bind(id)
     .all<Record<string, unknown>>();
 
-  return { ...issue, submissions: submissions.results ?? [] };
+  const portal = await ensureIssuePortal(env, id);
+
+  return { ...issue, submissions: submissions.results ?? [], portal_token: portal.token };
 }
 
 export async function getIssueBySlug(env: Env, slug: string) {
@@ -314,6 +381,80 @@ export async function listGalleryImages(env: Env, limit = 45) {
     .all<Record<string, unknown>>();
 
   return results ?? [];
+}
+
+export async function listIssueSubmissionsForPortal(env: Env, issueId: number) {
+  const { results } = await env.DB.prepare(
+    `SELECT
+       s.id,
+       s.title,
+       s.description,
+       s.author_name,
+       s.created_at,
+       s.status,
+       COALESCE(COUNT(v.id), 0) AS vote_count
+     FROM submissions s
+     LEFT JOIN submission_votes v ON v.submission_id = s.id
+     WHERE s.issue_id = ?1
+       AND s.status IN ('approved', 'published')
+     GROUP BY s.id
+     ORDER BY s.created_at ASC` ,
+  )
+    .bind(issueId)
+    .all<Record<string, unknown>>();
+
+  return (results ?? []).map((row) => {
+    const voteCount = (row as Record<string, unknown>).vote_count;
+    return {
+      ...row,
+      vote_count: typeof voteCount === 'number' ? voteCount : Number(voteCount ?? 0),
+    };
+  });
+}
+
+export async function countSubmissionVotes(env: Env, submissionId: number) {
+  const record = await env.DB.prepare(
+    `SELECT COUNT(*) AS votes FROM submission_votes WHERE submission_id = ?1` ,
+  )
+    .bind(submissionId)
+    .first<{ votes: number }>();
+  const votes = record?.votes;
+  return typeof votes === 'number' ? votes : Number(votes ?? 0);
+}
+
+export async function hasIpVotedForSubmission(env: Env, submissionId: number, voterIp: string) {
+  const record = await env.DB.prepare(
+    `SELECT 1 FROM submission_votes WHERE submission_id = ?1 AND voter_ip = ?2 LIMIT 1` ,
+  )
+    .bind(submissionId, voterIp)
+    .first();
+  return Boolean(record);
+}
+
+export async function countIpVotesForIssue(env: Env, issueId: number, voterIp: string) {
+  const record = await env.DB.prepare(
+    `SELECT COUNT(*) AS total
+     FROM submission_votes v
+     JOIN submissions s ON s.id = v.submission_id
+     WHERE s.issue_id = ?1 AND v.voter_ip = ?2` ,
+  )
+    .bind(issueId, voterIp)
+    .first<{ total: number }>();
+  const total = record?.total;
+  return typeof total === 'number' ? total : Number(total ?? 0);
+}
+
+export async function recordSubmissionVote(env: Env, submissionId: number, voterIp: string) {
+  const now = new Date().toISOString();
+  const inserted = await env.DB.prepare(
+    `INSERT INTO submission_votes (submission_id, voter_ip, created_at)
+     VALUES (?1, ?2, ?3)
+     ON CONFLICT(submission_id, voter_ip) DO NOTHING
+     RETURNING id` ,
+  )
+    .bind(submissionId, voterIp, now)
+    .first<{ id: number }>();
+  return inserted?.id ?? null;
 }
 
 export async function recordReview(
