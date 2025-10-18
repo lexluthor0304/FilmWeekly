@@ -5,7 +5,7 @@ compatibility_date = "2024-04-03"
 [[d1_databases]]
 binding = "DB"
 database_name = "filmweekly"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "8ea019d0-59e2-45fd-8bb8-35dfd2da5283"
 
 [[r2_buckets]]
 binding = "R2_BUCKET"
@@ -13,7 +13,7 @@ bucket_name = "filmweekly-assets"
 
 [[kv_namespaces]]
 binding = "CONFIG_KV"
-id = "00000000000000000000000000000000"
+id = "a3b70b46a9cb401c95fc7f6e290c613d"
 
 [[queues.producers]]
 binding = "TASK_QUEUE"
