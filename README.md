@@ -58,7 +58,22 @@ FilmWeekly 是一个基于 Cloudflare Workers 的胶片摄影期刊投稿与发�
 ## 前后端概览
 
 - `/`：列出所有已发布期刊，支持查看期刊详情与作品画廊展示。
-- `/admin`：内置单页后台，提供投稿审核、期刊创建与审计日志查看，需要 Bearer Token 才能调用 API。
-- `/api/*`：RESTful 接口；管理员相关接口需通过 `Authorization: Bearer <TOKEN>` 访问。
+- `/admin`：内置单页后台，提供投稿审核、期刊创建与审计日志查看，支持邮箱验证码免密登录。
+- `/api/*`：RESTful 接口；管理员相关接口需携带会话 Cookie 访问。
+
+### 管理后台登录接口
+
+- `POST /api/otp/request`：提交邮箱后生成 6 位验证码（单次有效、默认 5 分钟）并发送邮件。
+- `POST /api/otp/verify`：验证邮箱 + 验证码，成功后发放 HttpOnly 会话 Cookie。
+- `POST /api/otp/logout`：注销当前会话并清理 Cookie。
+- `GET /api/otp/session`：检查当前 Cookie 对应的会话状态。
+
+部署前需通过 `wrangler secret put` 设置以下敏感配置：
+
+- `OTP_PEPPER`：验证码哈希 Pepper。
+- `SESSION_HS256_SECRET`：会话 Token HMAC 密钥。
+- 邮件服务 API Key（示例使用 Resend 的 `RESEND_API_KEY` 与 `EMAIL_FROM_ADDRESS`）。
+
+此外，需要在 `admin_users` 表中预置允许登录的管理员邮箱（例如通过 D1 控制台或迁移脚本插入记录）。
 
 Worker 内置队列消费者处理缩略图生成与内容审核任务；可根据自身服务修改 `MODERATION_API_URL` 与 `MODERATION_API_TOKEN`。

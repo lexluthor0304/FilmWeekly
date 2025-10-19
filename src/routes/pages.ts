@@ -77,44 +77,93 @@ th { font-size: 0.85rem; color: rgba(148,163,184,0.85); }
 `;
 
 const adminScript = `<script type="module">
-const tokenInput = document.getElementById('admin-token');
-const saveBtn = document.getElementById('save-token');
-const clearBtn = document.getElementById('clear-token');
-const statusEl = document.getElementById('token-status');
+const loginSection = document.getElementById('admin-login');
+const dashboard = document.getElementById('admin-dashboard');
+const requestForm = document.getElementById('otp-request-form');
+const verifyForm = document.getElementById('otp-verify-form');
+const emailInput = document.getElementById('otp-email');
+const codeInput = document.getElementById('otp-code');
+const loginStatus = document.getElementById('login-status');
+const logoutBtn = document.getElementById('logout-btn');
+const sessionInfo = document.getElementById('session-info');
+const dashboardStatus = document.getElementById('dashboard-status');
 const submissionsContainer = document.getElementById('submissions');
 const auditContainer = document.getElementById('audit-logs');
 const issueForm = document.getElementById('issue-form');
 const toast = document.getElementById('toast');
 
-if (!tokenInput || !saveBtn || !clearBtn || !statusEl || !submissionsContainer || !auditContainer || !issueForm || !toast) {
+if (!loginSection || !dashboard || !requestForm || !verifyForm || !emailInput || !codeInput || !loginStatus || !logoutBtn || !sessionInfo || !dashboardStatus || !submissionsContainer || !auditContainer || !issueForm || !toast) {
   console.warn('Admin dashboard failed to initialize due to missing elements');
 } else {
-  let token = localStorage.getItem('filmweekly-admin-token') || '';
+  let currentSession = null;
 
-  if (token) {
-    tokenInput.value = token;
-    statusEl.textContent = '已加载令牌，正在同步数据…';
-    refreshAll();
-  }
-
-  saveBtn.addEventListener('click', () => {
-    token = tokenInput.value.trim();
-    if (!token) {
-      statusEl.textContent = '请填写 token';
+  requestForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const email = emailInput.value.trim().toLowerCase();
+    if (!email) {
+      setLoginStatus('请填写管理员邮箱', 'error');
       return;
     }
-    localStorage.setItem('filmweekly-admin-token', token);
-    statusEl.textContent = '令牌已保存，开始同步数据…';
-    refreshAll();
+    setLoginStatus('正在发送验证码…', 'info');
+    try {
+      const response = await fetch('/api/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+        credentials: 'include',
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error((payload && payload.error) || '发送失败');
+      }
+      setLoginStatus('验证码已发送，如未收到请稍后重试。', 'success');
+    } catch (error) {
+      const message = error && typeof error === 'object' && 'message' in error ? error.message : null;
+      setLoginStatus(message || '发送失败，请稍后重试', 'error');
+    }
   });
 
-  clearBtn.addEventListener('click', () => {
-    token = '';
-    tokenInput.value = '';
-    localStorage.removeItem('filmweekly-admin-token');
-    submissionsContainer.innerHTML = '';
-    auditContainer.innerHTML = '';
-    statusEl.textContent = '令牌已清除';
+  verifyForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const email = emailInput.value.trim().toLowerCase();
+    const code = codeInput.value.trim();
+    if (!email) {
+      setLoginStatus('请先填写邮箱并获取验证码', 'error');
+      return;
+    }
+    if (!/^\d{6}$/.test(code)) {
+      setLoginStatus('请输入 6 位验证码', 'error');
+      return;
+    }
+    setLoginStatus('正在验证…', 'info');
+    try {
+      const response = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+        credentials: 'include',
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error((payload && payload.error) || '验证失败');
+      }
+      setLoginStatus('验证成功，正在加载后台…', 'success');
+      codeInput.value = '';
+      await refreshSession();
+    } catch (error) {
+      const message = error && typeof error === 'object' && 'message' in error ? error.message : null;
+      setLoginStatus(message || '验证失败，请重试', 'error');
+    }
+  });
+
+  logoutBtn.addEventListener('click', async () => {
+    try {
+      await fetch('/api/otp/logout', { method: 'POST', credentials: 'include' });
+    } catch (error) {
+      console.warn('Logout request failed', error);
+    }
+    currentSession = null;
+    showLogin('已退出登录');
   });
 
   issueForm.addEventListener('submit', async (event) => {
@@ -167,20 +216,21 @@ if (!tokenInput || !saveBtn || !clearBtn || !statusEl || !submissionsContainer |
   });
 
   async function apiFetch(path, options) {
-    if (!token) {
-      throw new Error('请先保存管理员 token');
+    const init = Object.assign({}, options || {});
+    const headers = new Headers(init.headers || {});
+    if (init.body && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
     }
-    const response = await fetch(path, {
-      method: options && options.method ? options.method : 'GET',
-      headers: Object.assign(
-        {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer ' + token,
-        },
-        options && options.headers ? options.headers : {}
-      ),
-      body: options && options.body ? options.body : undefined,
-    });
+    init.method = init.method || 'GET';
+    init.credentials = 'include';
+    init.headers = headers;
+
+    const response = await fetch(path, init);
+
+    if (response.status === 401) {
+      currentSession = null;
+      showLogin('会话已过期，请重新登录');
+    }
 
     if (!response.ok) {
       let data = null;
@@ -192,10 +242,18 @@ if (!tokenInput || !saveBtn || !clearBtn || !statusEl || !submissionsContainer |
       throw new Error((data && data.error) || response.statusText);
     }
 
+    if (response.status === 204) {
+      return null;
+    }
+
     return response.json();
   }
 
   async function refreshAll() {
+    if (!currentSession) {
+      return;
+    }
+    dashboardStatus.textContent = '正在同步数据…';
     try {
       const [submissions, auditLogs] = await Promise.all([
         apiFetch('/api/submissions'),
@@ -203,10 +261,10 @@ if (!tokenInput || !saveBtn || !clearBtn || !statusEl || !submissionsContainer |
       ]);
       renderSubmissions(Array.isArray(submissions.data) ? submissions.data : []);
       renderAuditLogs(Array.isArray(auditLogs.data) ? auditLogs.data : []);
-      statusEl.textContent = '数据已更新';
+      dashboardStatus.textContent = '数据已更新';
     } catch (error) {
       const message = error && typeof error === 'object' && 'message' in error ? error.message : null;
-      statusEl.textContent = message || '同步失败';
+      dashboardStatus.textContent = message || '同步失败';
     }
   }
 
@@ -323,6 +381,69 @@ if (!tokenInput || !saveBtn || !clearBtn || !statusEl || !submissionsContainer |
       toast.style.display = 'none';
     }, 2200);
   }
+
+  function showLogin(message) {
+    loginSection.style.display = 'block';
+    dashboard.style.display = 'none';
+    dashboardStatus.textContent = '';
+    codeInput.value = '';
+    if (message) {
+      setLoginStatus(message, 'warning');
+    } else {
+      setLoginStatus('', 'info');
+    }
+  }
+
+  function showDashboard() {
+    loginSection.style.display = 'none';
+    dashboard.style.display = 'block';
+    if (currentSession && currentSession.email) {
+      sessionInfo.textContent = '已登录：' + currentSession.email;
+    } else {
+      sessionInfo.textContent = '已登录';
+    }
+  }
+
+  function setLoginStatus(message, variant) {
+    loginStatus.textContent = message || '';
+    if (!message) {
+      loginStatus.style.color = 'rgba(148,163,184,0.85)';
+      return;
+    }
+    if (variant === 'error') {
+      loginStatus.style.color = '#f87171';
+    } else if (variant === 'success') {
+      loginStatus.style.color = '#4ade80';
+    } else if (variant === 'warning') {
+      loginStatus.style.color = '#facc15';
+    } else {
+      loginStatus.style.color = 'rgba(148,163,184,0.85)';
+    }
+  }
+
+  async function refreshSession(showLoading) {
+    if (showLoading) {
+      setLoginStatus('正在检查登录状态…', 'info');
+    }
+    try {
+      const response = await fetch('/api/otp/session', { credentials: 'include' });
+      const payload = await response.json().catch(() => null);
+      if (payload && payload.data) {
+        currentSession = payload.data;
+        showDashboard();
+        setLoginStatus('', 'info');
+        await refreshAll();
+      } else {
+        currentSession = null;
+        showLogin();
+      }
+    } catch (error) {
+      currentSession = null;
+      showLogin('无法检查登录状态，请稍后重试');
+    }
+  }
+
+  refreshSession(true);
 }
 </script>`;
 
@@ -660,43 +781,59 @@ pagesRoute.get('/admin', (c) => {
   const body = `
     <header>
       <h1 style="font-size: clamp(2rem, 4vw, 3rem); margin-bottom: 0.75rem;">后台管理</h1>
-      <p style="color: rgba(148,163,184,0.85);">输入管理员令牌以加载投稿、期刊、审计日志并进行审核操作。</p>
+      <p style="color: rgba(148,163,184,0.85);">使用管理员邮箱接收验证码，完成登录后即可进行投稿审核与期刊管理。</p>
     </header>
     <div class="admin-container">
-      <section class="card" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
-        <label style="flex:1; min-width: 240px;">
-          <span style="display:block; font-size:0.85rem; color: rgba(148,163,184,0.85); margin-bottom:0.35rem;">管理员 API Token</span>
-          <input id="admin-token" type="password" placeholder="粘贴 Bearer Token" />
-        </label>
-        <button id="save-token" type="button">保存</button>
-        <button id="clear-token" type="button" style="background: rgba(239,68,68,0.85); color: #fff; box-shadow:none;">清除</button>
-        <span id="token-status" style="flex-basis:100%; color: rgba(148,163,184,0.85); font-size:0.9rem; margin-top:0.5rem;"></span>
+      <section class="card" id="admin-login" style="display:flex; flex-direction:column; gap:0.75rem;">
+        <h2 style="margin:0;">邮箱验证码登录</h2>
+        <form id="otp-request-form" style="display:grid; gap:0.5rem;">
+          <label style="display:flex; flex-direction:column; gap:0.35rem;">
+            <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">管理员邮箱</span>
+            <input id="otp-email" type="email" placeholder="name@example.com" required />
+          </label>
+          <button type="submit">发送验证码</button>
+        </form>
+        <form id="otp-verify-form" style="display:grid; gap:0.5rem;">
+          <label style="display:flex; flex-direction:column; gap:0.35rem;">
+            <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">邮箱验证码</span>
+            <input id="otp-code" type="text" inputmode="numeric" pattern="\\d{6}" placeholder="6 位数字" required />
+          </label>
+          <button type="submit">验证并登录</button>
+        </form>
+        <p id="login-status" style="min-height:1.5rem; color: rgba(148,163,184,0.85);"></p>
       </section>
-      <div class="admin-grid">
-        <section class="card">
-          <h2 style="margin-top:0;">投稿审核</h2>
-          <div id="submissions"></div>
+      <div id="admin-dashboard" style="display:none; width:100%;">
+        <section class="card" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+          <span id="session-info" style="flex:1; min-width:240px; color: rgba(148,163,184,0.9);"></span>
+          <button id="logout-btn" type="button" style="background: rgba(239,68,68,0.85); color:#fff; box-shadow:none;">退出登录</button>
+          <span id="dashboard-status" style="flex-basis:100%; color: rgba(148,163,184,0.85); font-size:0.9rem; margin-top:0.5rem;"></span>
         </section>
-        <section class="card">
-          <h2 style="margin-top:0;">快速创建期刊</h2>
-          <form id="issue-form" style="display:grid; gap:0.75rem;">
-            <input name="slug" placeholder="期刊 slug，如 2024-week-10" required />
-            <input name="title" placeholder="期刊标题" required />
-            <textarea name="guidance" placeholder="导向语" required></textarea>
-            <textarea name="summary" placeholder="期刊摘要"></textarea>
-            <label style="display:flex; flex-direction:column; gap:0.35rem;">
-              <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">发布时间（期刊将于该时间自动公开）</span>
-              <input name="publishAt" type="datetime-local" placeholder="选择发布时间 (可选)" />
-            </label>
-            <label style="display:flex; flex-direction:column; gap:0.35rem;">
-              <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">投稿截止时间（超过此时间停止接受投稿）</span>
-              <input name="submissionDeadline" type="datetime-local" placeholder="选择投稿截止时间 (可选)" />
-            </label>
-            <button type="submit">创建期刊</button>
-          </form>
-          <h3 style="margin-top:1.5rem;">审计日志</h3>
-          <div id="audit-logs" style="max-height:240px; overflow:auto; font-size:0.85rem; line-height:1.6; color: rgba(148,163,184,0.85);"></div>
-        </section>
+        <div class="admin-grid">
+          <section class="card">
+            <h2 style="margin-top:0;">投稿审核</h2>
+            <div id="submissions"></div>
+          </section>
+          <section class="card">
+            <h2 style="margin-top:0;">快速创建期刊</h2>
+            <form id="issue-form" style="display:grid; gap:0.75rem;">
+              <input name="slug" placeholder="期刊 slug，如 2024-week-10" required />
+              <input name="title" placeholder="期刊标题" required />
+              <textarea name="guidance" placeholder="导向语" required></textarea>
+              <textarea name="summary" placeholder="期刊摘要"></textarea>
+              <label style="display:flex; flex-direction:column; gap:0.35rem;">
+                <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">发布时间（期刊将于该时间自动公开）</span>
+                <input name="publishAt" type="datetime-local" placeholder="选择发布时间 (可选)" />
+              </label>
+              <label style="display:flex; flex-direction:column; gap:0.35rem;">
+                <span style="font-size:0.85rem; color: rgba(148,163,184,0.85);">投稿截止时间（超过此时间停止接受投稿）</span>
+                <input name="submissionDeadline" type="datetime-local" placeholder="选择投稿截止时间 (可选)" />
+              </label>
+              <button type="submit">创建期刊</button>
+            </form>
+            <h3 style="margin-top:1.5rem;">审计日志</h3>
+            <div id="audit-logs" style="max-height:240px; overflow:auto; font-size:0.85rem; line-height:1.6; color: rgba(148,163,184,0.85);"></div>
+          </section>
+        </div>
       </div>
     </div>
     <div class="toast" id="toast"></div>

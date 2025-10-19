@@ -12,10 +12,10 @@ import {
   recordReview,
   recordSubmissionVote,
 } from '../lib/db';
-import { getActor, requireAdmin } from '../lib/middleware';
+import { AdminVariables, AppContext, getActor, getAdminSessionFromCookie, requireAdmin } from '../lib/middleware';
 import type { Env } from '../types/bindings';
 
-export const submissionsRoute = new Hono<{ Bindings: Env; Variables: { actor?: string } }>();
+export const submissionsRoute = new Hono<{ Bindings: Env; Variables: AdminVariables }>();
 
 submissionsRoute.get('/', requireAdmin(), async (c) => {
   const searchParams = new URL(c.req.url).searchParams;
@@ -23,16 +23,7 @@ submissionsRoute.get('/', requireAdmin(), async (c) => {
   return c.json({ data: submissions });
 });
 
-function isAdminRequest(c: Context<{ Bindings: Env; Variables: { actor?: string } }>) {
-  const header = c.req.header('authorization');
-  if (!header || !header.startsWith('Bearer ')) {
-    return false;
-  }
-  const token = header.slice('Bearer '.length).trim();
-  return Boolean(token) && token === c.env.ADMIN_API_TOKEN;
-}
-
-function getClientIp(c: Context<{ Bindings: Env; Variables: { actor?: string } }>) {
+function getClientIp(c: Context<{ Bindings: Env; Variables: AdminVariables }>) {
   const cfIp = c.req.header('cf-connecting-ip');
   if (cfIp) return cfIp;
   const forwarded = c.req.header('x-forwarded-for');
@@ -54,7 +45,8 @@ submissionsRoute.post('/', async (c) => {
     return c.json({ error: 'Invalid submission payload', details: parsed.error.flatten() }, 400);
   }
 
-  const adminRequest = isAdminRequest(c);
+  const adminSession = await getAdminSessionFromCookie(c as AppContext);
+  const adminRequest = Boolean(adminSession);
   let issueId = parsed.data.issueId;
 
   if (!adminRequest) {

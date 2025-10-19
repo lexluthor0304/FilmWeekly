@@ -3,7 +3,7 @@ import { listRecentAuditLogs } from '../lib/db';
 import { requireAdmin, getActor } from '../lib/middleware';
 import type { Env } from '../types/bindings';
 
-export const adminRoute = new Hono<{ Bindings: Env; Variables: { actor?: string } }>();
+export const adminRoute = new Hono<{ Bindings: Env; Variables: { actor?: string; adminUserId?: number } }>();
 
 adminRoute.get('/audit-logs', requireAdmin(), async (c) => {
   const limit = Number(new URL(c.req.url).searchParams.get('limit') ?? '50');
@@ -12,7 +12,8 @@ adminRoute.get('/audit-logs', requireAdmin(), async (c) => {
 });
 
 adminRoute.get('/me', requireAdmin(), (c) => {
-  return c.json({ data: { actor: getActor(c) } });
+  const adminUserId = c.get('adminUserId');
+  return c.json({ data: { actor: getActor(c), adminUserId: adminUserId ?? null } });
 });
 
 export default adminRoute;

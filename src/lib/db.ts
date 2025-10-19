@@ -6,6 +6,187 @@ import type {
   SubmissionInput,
 } from './validation';
 
+export interface AdminUserRecord {
+  id: number;
+  email: string;
+  name: string | null;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string | null;
+}
+
+export interface OtpChallengeRecord {
+  id: number;
+  user_id: number;
+  challenge_id: string;
+  code_hash: string;
+  attempt_count: number;
+  consumed: number;
+  expires_at: string;
+  consumed_at: string | null;
+  created_at: string;
+}
+
+export interface AdminSessionRecord {
+  id: number;
+  user_id: number;
+  session_id: string;
+  token_hash: string;
+  created_at: string;
+  expires_at: string;
+  last_used_at: string | null;
+  revoked: number;
+}
+
+export type AdminSessionWithUser = AdminSessionRecord & {
+  user_email: string;
+  user_name: string | null;
+};
+
+export async function getAdminUserByEmail(env: Env, email: string) {
+  return env.DB.prepare(
+    `SELECT id, email, name, created_at, updated_at, last_login_at
+     FROM admin_users
+     WHERE email = ?1`,
+  )
+    .bind(email)
+    .first<AdminUserRecord>();
+}
+
+export async function updateAdminLastLogin(env: Env, userId: number) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE admin_users
+     SET last_login_at = ?2, updated_at = ?2
+     WHERE id = ?1`,
+  )
+    .bind(userId, now)
+    .run();
+}
+
+export async function createOtpChallenge(
+  env: Env,
+  input: {
+    userId: number;
+    challengeId: string;
+    codeHash: string;
+    expiresAt: string;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  },
+) {
+  await env.DB.prepare(
+    `INSERT INTO admin_otp_challenges
+      (user_id, challenge_id, code_hash, expires_at, ip_address, user_agent)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)` ,
+  )
+    .bind(
+      input.userId,
+      input.challengeId,
+      input.codeHash,
+      input.expiresAt,
+      input.ipAddress ?? null,
+      input.userAgent ?? null,
+    )
+    .run();
+}
+
+export async function getLatestOtpChallenge(env: Env, userId: number) {
+  return env.DB.prepare(
+    `SELECT id, user_id, challenge_id, code_hash, attempt_count, consumed, expires_at, consumed_at, created_at
+     FROM admin_otp_challenges
+     WHERE user_id = ?1 AND consumed = 0
+     ORDER BY created_at DESC
+     LIMIT 1`,
+  )
+    .bind(userId)
+    .first<OtpChallengeRecord>();
+}
+
+export async function incrementOtpAttempt(env: Env, challengeId: string) {
+  return env.DB.prepare(
+    `UPDATE admin_otp_challenges
+     SET attempt_count = attempt_count + 1
+     WHERE challenge_id = ?1
+     RETURNING attempt_count`,
+  )
+    .bind(challengeId)
+    .first<{ attempt_count: number }>();
+}
+
+export async function consumeOtpChallenge(env: Env, challengeId: string) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE admin_otp_challenges
+     SET consumed = 1, consumed_at = ?2
+     WHERE challenge_id = ?1`,
+  )
+    .bind(challengeId, now)
+    .run();
+}
+
+export async function createAdminSession(
+  env: Env,
+  input: {
+    userId: number;
+    sessionId: string;
+    tokenHash: string;
+    expiresAt: string;
+    ipAddress?: string | null;
+    userAgent?: string | null;
+  },
+) {
+  await env.DB.prepare(
+    `INSERT INTO admin_sessions
+      (user_id, session_id, token_hash, expires_at, ip_address, user_agent)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)` ,
+  )
+    .bind(
+      input.userId,
+      input.sessionId,
+      input.tokenHash,
+      input.expiresAt,
+      input.ipAddress ?? null,
+      input.userAgent ?? null,
+    )
+    .run();
+}
+
+export async function getAdminSession(env: Env, sessionId: string) {
+  return env.DB.prepare(
+    `SELECT s.id, s.user_id, s.session_id, s.token_hash, s.created_at, s.expires_at,
+            s.last_used_at, s.revoked,
+            u.email as user_email, u.name as user_name
+     FROM admin_sessions s
+     JOIN admin_users u ON u.id = s.user_id
+     WHERE s.session_id = ?1`,
+  )
+    .bind(sessionId)
+    .first<AdminSessionWithUser>();
+}
+
+export async function touchAdminSession(env: Env, sessionId: string) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE admin_sessions
+     SET last_used_at = ?2
+     WHERE session_id = ?1`,
+  )
+    .bind(sessionId, now)
+    .run();
+}
+
+export async function revokeAdminSession(env: Env, sessionId: string) {
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `UPDATE admin_sessions
+     SET revoked = 1, expires_at = CASE WHEN expires_at < ?2 THEN expires_at ELSE ?2 END
+     WHERE session_id = ?1`,
+  )
+    .bind(sessionId, now)
+    .run();
+}
+
 export type SubmissionStatus = 'pending' | 'approved' | 'rejected' | 'needs-revision' | 'published';
 export type IssueStatus = 'draft' | 'scheduled' | 'published';
 
