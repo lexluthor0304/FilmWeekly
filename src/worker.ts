@@ -6,6 +6,7 @@ import { uploadsRoute } from './routes/uploads';
 import { portalsRoute } from './routes/portals';
 import pagesRoute from './routes/pages';
 import adminRoute from './routes/admin';
+import otpRoute from './routes/otp';
 import { handleModerationTask, handleThumbnailTask } from './lib/tasks';
 import type { Env } from './types/bindings';
 import type { QueueTask } from './lib/tasks';
@@ -22,7 +23,7 @@ interface MessageBatch<T = unknown> {
   messages: Array<QueueMessage<T>>;
 }
 
-const app = new Hono<{ Bindings: Env; Variables: { actor?: string } }>();
+const app = new Hono<{ Bindings: Env; Variables: { actor?: string; adminUserId?: number } }>();
 
 app.use('/api/*', cors());
 
@@ -74,6 +75,7 @@ app.route('/api/issues', issuesRoute);
 app.route('/api/submissions', submissionsRoute);
 app.route('/api/uploads', uploadsRoute);
 app.route('/api/portals', portalsRoute);
+app.route('/api/otp', otpRoute);
 app.route('/api/admin', adminRoute);
 
 app.notFound((c) => c.json({ error: 'Not Found' }, 404));
