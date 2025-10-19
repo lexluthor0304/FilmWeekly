@@ -3,7 +3,6 @@ main = "src/worker.ts"
 compatibility_date = "2024-04-03"
 
 [vars]
-ADMIN_API_TOKEN = "changeme-admin-token"
 MODERATION_API_URL = "https://moderation.example.com/v1/analyze"
 MODERATION_API_TOKEN = "changeme-moderation-token"
 

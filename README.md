@@ -59,7 +59,7 @@ FilmWeekly 是一个基于 Cloudflare Workers 的胶片摄影期刊投稿与发�
 
 - `/`：列出所有已发布期刊，支持查看期刊详情与作品画廊展示。
 - `/admin`：内置单页后台，提供投稿审核、期刊创建与审计日志查看，支持邮箱验证码免密登录。
-- `/api/*`：RESTful 接口；管理员相关接口需携带会话 Cookie（或备用 Bearer Token）访问。
+- `/api/*`：RESTful 接口；管理员相关接口需携带会话 Cookie 访问。
 
 ### 管理后台登录接口
 

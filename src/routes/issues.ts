@@ -1,10 +1,10 @@
 import { Hono } from 'hono';
 import { issueSchema, publishIssueSchema } from '../lib/validation';
 import { createIssue, getIssue, listIssues, updateIssueStatus } from '../lib/db';
-import { getActor, requireAdmin } from '../lib/middleware';
+import { AdminVariables, getActor, requireAdmin } from '../lib/middleware';
 import type { Env } from '../types/bindings';
 
-export const issuesRoute = new Hono<{ Bindings: Env; Variables: { actor?: string } }>();
+export const issuesRoute = new Hono<{ Bindings: Env; Variables: AdminVariables }>();
 
 issuesRoute.get('/', async (c) => {
   const issues = await listIssues(c.env);

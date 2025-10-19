@@ -9,9 +9,10 @@ import {
 } from './db';
 import type { Env } from '../types/bindings';
 
-export type AppContext = Context<{ Bindings: Env; Variables: { actor?: string; adminUserId?: number } }>;
+export type AdminVariables = { actor?: string; adminUserId?: number };
+export type AppContext = Context<{ Bindings: Env; Variables: AdminVariables }>;
 
-async function getSessionFromCookie(c: AppContext): Promise<AdminSessionWithUser | null> {
+export async function getAdminSessionFromCookie(c: AppContext): Promise<AdminSessionWithUser | null> {
   const cookie = getCookie(c, ADMIN_SESSION_COOKIE);
   const parsed = parseSessionCookie(cookie);
   if (!parsed) return null;
@@ -42,26 +43,13 @@ async function getSessionFromCookie(c: AppContext): Promise<AdminSessionWithUser
 
 export function requireAdmin() {
   return async (c: AppContext, next: Next) => {
-    const session = await getSessionFromCookie(c);
-    if (session) {
-      c.set('actor', session.user_email ?? 'admin');
-      c.set('adminUserId', session.user_id);
-      await next();
-      return;
-    }
-
-    const header = c.req.header('authorization');
-    if (!header || !header.startsWith('Bearer ')) {
+    const session = await getAdminSessionFromCookie(c);
+    if (!session) {
       return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const token = header.slice('Bearer '.length).trim();
-    if (!token || !c.env.ADMIN_API_TOKEN || token !== c.env.ADMIN_API_TOKEN) {
-      return c.json({ error: 'Forbidden' }, 403);
-    }
-
-    const actor = c.req.header('x-admin-actor') ?? 'admin';
-    c.set('actor', actor);
+    c.set('actor', session.user_email ?? 'admin');
+    c.set('adminUserId', session.user_id);
     await next();
   };
 }
