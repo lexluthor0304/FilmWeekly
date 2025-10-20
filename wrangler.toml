@@ -5,6 +5,8 @@ compatibility_date = "2024-04-03"
 [vars]
 MODERATION_API_URL = "https://moderation.example.com/v1/analyze"
 MODERATION_API_TOKEN = "changeme-moderation-token"
+OTP_PEPPER = "6e2bc82427f280c2f7da5215d88b58f437ade807ae8803ebffcc77e7499ea0c4"
+SESSION_HS256_SECRET = "3c7f8bbe8bbfccc0fab1e5a6a8aaacf31e7ea2fb6a1b58f101cb03c1e9414073"
 
 [[d1_databases]]
 binding = "DB"
