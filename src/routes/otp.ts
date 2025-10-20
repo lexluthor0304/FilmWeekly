@@ -52,8 +52,18 @@ function getUserAgent(c: OtpContext) {
   return c.req.header('user-agent') ?? null;
 }
 
-async function fakeHash(env: Env) {
-  await hmacSha256(env.OTP_PEPPER, crypto.randomUUID());
+function getOtpPepper(env: Env): string | null {
+  const value = env.OTP_PEPPER?.trim();
+  return value ? value : null;
+}
+
+function getSessionSecret(env: Env): string | null {
+  const value = env.SESSION_HS256_SECRET?.trim();
+  return value ? value : null;
+}
+
+async function fakeHash(secret: string) {
+  await hmacSha256(secret, crypto.randomUUID());
 }
 
 otpRoute.post('/request', async (c) => {
@@ -64,10 +74,17 @@ otpRoute.post('/request', async (c) => {
   }
 
   const email = parsed.data.email.toLowerCase();
+  const otpPepper = getOtpPepper(c.env);
+
+  if (!otpPepper) {
+    console.error('OTP_PEPPER is not configured; unable to generate OTP');
+    return c.json({ error: 'OTP service is temporarily unavailable' }, 500);
+  }
+
   const user = await getAdminUserByEmail(c.env, email);
 
   if (!user) {
-    await fakeHash(c.env);
+    await fakeHash(otpPepper);
     return c.json({ ok: true });
   }
 
@@ -85,7 +102,7 @@ otpRoute.post('/request', async (c) => {
 
   const code = generateNumericCode(OTP_LENGTH);
   const challengeId = crypto.randomUUID();
-  const codeHash = await hmacSha256(c.env.OTP_PEPPER, `${user.id}|${code}|${challengeId}`);
+  const codeHash = await hmacSha256(otpPepper, `${user.id}|${code}|${challengeId}`);
   const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString();
 
   await createOtpChallenge(c.env, {
@@ -111,16 +128,27 @@ otpRoute.post('/verify', async (c) => {
 
   const email = parsed.data.email.toLowerCase();
   const code = parsed.data.code;
+  const otpPepper = getOtpPepper(c.env);
+  if (!otpPepper) {
+    console.error('OTP_PEPPER is not configured; unable to verify OTP');
+    return c.json({ error: 'OTP service is temporarily unavailable' }, 500);
+  }
+  const sessionSecret = getSessionSecret(c.env);
+  if (!sessionSecret) {
+    console.error('SESSION_HS256_SECRET is not configured; unable to issue session token');
+    return c.json({ error: 'OTP service is temporarily unavailable' }, 500);
+  }
+
   const user = await getAdminUserByEmail(c.env, email);
 
   if (!user) {
-    await fakeHash(c.env);
+    await fakeHash(otpPepper);
     return c.json({ error: 'Invalid or expired code' }, 400);
   }
 
   const challenge = await getLatestOtpChallenge(c.env, user.id);
   if (!challenge) {
-    await fakeHash(c.env);
+    await fakeHash(otpPepper);
     return c.json({ error: 'Invalid or expired code' }, 400);
   }
 
@@ -140,7 +168,7 @@ otpRoute.post('/verify', async (c) => {
     return c.json({ error: 'Invalid or expired code' }, 400);
   }
 
-  const computedHash = await hmacSha256(c.env.OTP_PEPPER, `${user.id}|${code}|${challenge.challenge_id}`);
+  const computedHash = await hmacSha256(otpPepper, `${user.id}|${code}|${challenge.challenge_id}`);
   const isValid = timingSafeEqualHex(challenge.code_hash, computedHash);
 
   if (!isValid) {
@@ -155,10 +183,7 @@ otpRoute.post('/verify', async (c) => {
   await updateAdminLastLogin(c.env, user.id);
 
   const secret = generateSessionSecret();
-  const tokenHash = await hmacSha256(
-    c.env.SESSION_HS256_SECRET,
-    `${secret.sessionId}|${secret.token}`,
-  );
+  const tokenHash = await hmacSha256(sessionSecret, `${secret.sessionId}|${secret.token}`);
   const expiresAtIso = new Date(Date.now() + SESSION_TTL_MS).toISOString();
 
   await createAdminSession(c.env, {
@@ -219,10 +244,14 @@ otpRoute.get('/session', async (c) => {
     return c.json({ data: null });
   }
 
-  const tokenHash = await hmacSha256(
-    c.env.SESSION_HS256_SECRET,
-    `${parsed.sessionId}|${parsed.token}`,
-  );
+  const sessionSecret = getSessionSecret(c.env);
+  if (!sessionSecret) {
+    console.error('SESSION_HS256_SECRET is not configured; unable to validate session');
+    deleteCookie(c, ADMIN_SESSION_COOKIE, { path: '/' });
+    return c.json({ data: null });
+  }
+
+  const tokenHash = await hmacSha256(sessionSecret, `${parsed.sessionId}|${parsed.token}`);
 
   const isValid = timingSafeEqualHex(session.token_hash, tokenHash);
   const expired = new Date(session.expires_at).getTime() < Date.now();

@@ -17,6 +17,13 @@ export async function getAdminSessionFromCookie(c: AppContext): Promise<AdminSes
   const parsed = parseSessionCookie(cookie);
   if (!parsed) return null;
 
+  const sessionSecret = c.env.SESSION_HS256_SECRET?.trim();
+  if (!sessionSecret) {
+    console.error('SESSION_HS256_SECRET is not configured; rejecting admin session');
+    deleteCookie(c, ADMIN_SESSION_COOKIE, { path: '/' });
+    return null;
+  }
+
   const session = await getAdminSession(c.env, parsed.sessionId);
   if (!session || session.revoked !== 0) {
     deleteCookie(c, ADMIN_SESSION_COOKIE, { path: '/' });
@@ -24,7 +31,7 @@ export async function getAdminSessionFromCookie(c: AppContext): Promise<AdminSes
   }
 
   const tokenHash = await hmacSha256(
-    c.env.SESSION_HS256_SECRET,
+    sessionSecret,
     `${parsed.sessionId}|${parsed.token}`,
   );
 
