@@ -7,8 +7,8 @@ export interface Env {
   TASK_QUEUE: Queue;
   MODERATION_API_URL: string;
   MODERATION_API_TOKEN: string;
-  OTP_PEPPER: string;
-  SESSION_HS256_SECRET: string;
+  OTP_PEPPER?: string;
+  SESSION_HS256_SECRET?: string;
   RESEND_API_KEY?: string;
   EMAIL_FROM_ADDRESS?: string;
 }
