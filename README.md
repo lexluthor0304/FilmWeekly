@@ -68,11 +68,22 @@ FilmWeekly 是一个基于 Cloudflare Workers 的胶片摄影期刊投稿与发�
 - `POST /api/otp/logout`：注销当前会话并清理 Cookie。
 - `GET /api/otp/session`：检查当前 Cookie 对应的会话状态。
 
+### 环境变量与 Secrets
+
+本地开发可直接在 `wrangler.toml` 的 `[vars]` 中填入调试用值（仓库默认示例已提供占位符，请在生产部署前替换为安全的随机字符串）。
+
 部署前需通过 `wrangler secret put` 设置以下敏感配置：
 
 - `OTP_PEPPER`：验证码哈希 Pepper。
 - `SESSION_HS256_SECRET`：会话 Token HMAC 密钥。
 - 邮件服务 API Key（示例使用 Resend 的 `RESEND_API_KEY` 与 `EMAIL_FROM_ADDRESS`）。
+
+例如：
+
+```bash
+wrangler secret put OTP_PEPPER
+wrangler secret put SESSION_HS256_SECRET
+```
 
 此外，需要在 `admin_users` 表中预置允许登录的管理员邮箱（例如通过 D1 控制台或迁移脚本插入记录）。
 
